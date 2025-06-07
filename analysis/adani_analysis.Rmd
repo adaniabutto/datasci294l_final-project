@@ -347,6 +347,11 @@ df.analysis %>%
        fill = "Puzzle block") +
   coord_flip()
 
+# export plot
+ggsave((paste0(figures_dir,
+               "pct_correct_perpuzzle.png")),
+       width = 12, height = 10, device = "png")
+
 ```
 
 ## No of boxes solved per puzzle
@@ -389,6 +394,11 @@ df.analysis %>%
        subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)",
        color = "Puzzle block") +
   coord_flip()
+
+# export plot
+ggsave((paste0(figures_dir,
+               "no_boxes_perpuzzle.png")),
+       width = 12, height = 10, device = "png")
 
 ```
 
@@ -433,6 +443,11 @@ df.analysis %>%
        color = "Puzzle block") +
   coord_flip()
 
+# export plot
+ggsave((paste0(figures_dir,
+               "no_moves_perpuzzle.png")),
+       width = 12, height = 10, device = "png")
+
 ```
 
 ## Time until solution
@@ -475,6 +490,11 @@ df.analysis %>%
        subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)",
        color = "Puzzle block") +
   coord_flip()
+
+# export plot
+ggsave((paste0(figures_dir,
+               "solution_time_perpuzzle.png")),
+       width = 12, height = 10, device = "png")
 
 ```
 
@@ -523,6 +543,11 @@ plot1 =
 
 plot1
 
+# export plot
+ggsave((paste0(figures_dir,
+               "pct_solved_over_time.png")),
+       width = 12, height = 10, device = "png")
+
 ```
 
 Do we see a progression in % solved when we break it down by puzzle order?
@@ -545,6 +570,11 @@ df.analysis %>%
        fill = "Puzzle") +
   theme(legend.position = "none") +
   scale_x_continuous(breaks = seq(1,8,1))
+
+# export plot
+ggsave((paste0(figures_dir,
+               "pct_solved_over_time_perpuzzle.png")),
+       width = 7, height = 5, device = "png")
 
 ```
 
@@ -627,6 +657,11 @@ plot2 =
 
 plot2
 
+# export plot
+ggsave((paste0(figures_dir,
+               "no_boxes_solved_over_time.png")),
+       width = 12, height = 10, device = "png")
+
 ```
 
 When broken down by individual puzzle:
@@ -651,6 +686,11 @@ df.analysis %>%
   scale_x_continuous(breaks = seq(1,8,1)) +
   scale_y_continuous(limits = c(0,3),
                      breaks = seq(0,3,1))
+
+# export plot
+ggsave((paste0(figures_dir,
+               "no_boxes_over_time_perpuzzle.png")),
+       width = 8, height = 5, device = "png")
 
 ```
 
@@ -732,6 +772,11 @@ plot3 =
 
 plot3
 
+# export plot
+ggsave((paste0(figures_dir,
+               "time_spent_solved_over_time.png")),
+       width = 12, height = 10, device = "png")
+
 ```
 
 When broken down by puzzle:
@@ -756,6 +801,11 @@ df.analysis %>%
   scale_x_continuous(breaks = seq(1,8,1)) +
   scale_y_continuous(limits = c(0,300),
                      breaks = seq(0,300,60))
+
+# export plot
+ggsave((paste0(figures_dir,
+               "time_spent_over_time_perpuzzle.png")),
+       width = 8, height = 5, device = "png")
 
 ```
 
@@ -835,6 +885,11 @@ plot4 =
 
 plot4
 
+# export plot
+ggsave((paste0(figures_dir,
+               "no_moves_over_time.png")),
+       width = 12, height = 10, device = "png")
+
 ```
 
 ```{r fig.width = 20, fig.height = 17}
@@ -868,6 +923,11 @@ df.analysis %>%
   scale_x_continuous(breaks = seq(1,8,1)) +
   scale_y_continuous(limits = c(0, 600),
                      breaks = seq(0,600,100))
+
+# export plot
+ggsave((paste0(figures_dir,
+               "no_moves_over_time_perpuzzle.png")),
+       width = 8, height = 5, device = "png")
 
 ```
 
@@ -920,7 +980,7 @@ lm.moves_order %>%
 
 Does success on the previous puzzle influence specific puzzle choice?
 
-```{r fig.width = 12, fig.height = 10}
+```{r fig.width = 16, fig.height = 10}
 
 df.analysis =
   df.analysis %>%
@@ -943,12 +1003,17 @@ df.analysis %>%
   labs(x = "Previous puzzle solved?",
        y = "% of times puzzle was chosen",
        fill = "Puzzle",
-       title = "Player Puzzle Selection by Previous Puzzle Success") +
+       title = "Puzzle selection by previous puzzle outcome") +
   theme(legend.position = "none")
+
+# export plot
+ggsave((paste0(figures_dir,
+               "puzzle_selection.png")),
+       width = 16, height = 10, device = "png")
 
 ```
 
-```{r}
+```{r fig.width = 12, fig.height = 10}
 
 df.analysis %>%
   mutate(puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
@@ -977,6 +1042,11 @@ df.analysis %>%
        subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)") +
   coord_flip() +
   theme(legend.position = "right")
+
+# export plot
+ggsave((paste0(figures_dir,
+               "pct_solved_by_prev_success.png")),
+       width = 12, height = 10, device = "png")
 
 ```
 
@@ -1356,6 +1426,9 @@ combined_plot =
 
 combined_plot
 
-```
+# export plot
+ggsave((paste0(figures_dir,
+               "growth_models.png")),
+       width = 12, height = 8, device = "png")
 
-# 
+```

@@ -876,16 +876,29 @@ Fitting the mixed effects model:
 ```{r}
 
 # mixed effects model
+lm.moves_order_empty =
+  glmer(attempt_nInputEvents ~
+          1 +
+          # controlling for other variables
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.analysis)
+
 lm.moves_order =
   glmer(attempt_nInputEvents ~
           1 +
           # fixed effect for puzzle order (controlling for difficulty)
           trialNum +
           # controlling for other variables
+          scale(age) + # age
           scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
           scale(participantEffort) + # subjective effort
-          scale(attempt_nRestart) + # no of attempts
-          scale(mean_enjoyable) + # sampled enjoyment ratings
           # random intercept for player
           (1 | subject_id),
         family = poisson(link = "log"),
@@ -894,6 +907,8 @@ lm.moves_order =
 # summary
 lm.moves_order %>%
   summary()
+
+anova(lm.moves_order_empty, lm.moves_order)
 
 # Calculate estimates
 lm.moves_order %>%
@@ -1020,9 +1035,9 @@ lm.solve_growth_null =
   glmer(solved ~
           1 +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
-          (1 | puzzle_id_sorted) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
+          (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
         data = df.analysis,
         family = binomial(link = "logit"),
@@ -1034,9 +1049,9 @@ lm.solve_growth =
           # fixed effect
           trialNum +
           # control vars
-          # scale(astar_solution_length) +
-          # scale(sokobanonline__solve_rate) +
-          # (1 | puzzle_id_sorted) + # random slope for puzzle
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
+          (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
         data = df.analysis,
         family = binomial(link = "logit"),
@@ -1060,7 +1075,8 @@ df.analysis_subject =
   summarise(mean_pred = mean(predicted_solve, na.rm = TRUE),
             .groups = "drop")
 
-df.analysis_subject %>%
+plot1 =
+  df.analysis_subject %>%
   ggplot(aes(x = trialNum,
              y = (mean_pred*100))) +
   geom_line(aes(group = subject_id),
@@ -1077,10 +1093,12 @@ df.analysis_subject %>%
   labs(x = "Puzzle #",
        y = "% solved",
        title = "Predicted performance curves across puzzles: % solved",
-       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+       subtitle = "Grey lines are predicted lines for individual subjects,\nblue line and ribbon equal predicted mean + 95% CI") +
   scale_x_continuous(limits = c(1, 8),
                      breaks = seq(1,8,1)) +
   theme_minimal()
+
+plot1
 
 ```
 
@@ -1093,8 +1111,8 @@ lm.boxes_growth_null =
   glmer(boxesSolved ~
           1 +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
           (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
   data = df.analysis,
@@ -1106,8 +1124,8 @@ lm.boxes_growth =
           1 +
           trialNum +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
           (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
         data = df.analysis,
@@ -1132,7 +1150,8 @@ df.analysis_subject =
   summarise(mean_pred = mean(predicted_boxes, na.rm = TRUE),
             .groups = "drop")
 
-df.analysis_subject %>%
+plot2 =
+  df.analysis_subject %>%
   ggplot(aes(x = trialNum,
              y = mean_pred)) +
   geom_line(aes(group = subject_id),
@@ -1153,12 +1172,14 @@ df.analysis_subject %>%
   labs(x = "Puzzle #",
        y = "# of boxes solved",
        title = "Predicted performance curves across puzzles: # of boxes solved",
-       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+       subtitle = "Grey lines are predicted lines for individual subjects,\nblue line and ribbon equal predicted mean + 95% CI") +
   scale_x_continuous(limits = c(1, 8),
                      breaks = seq(1,8,1)) +
   scale_y_continuous(limits = c(0, 3),
                      breaks = seq(0,3, 1)) +
   theme_minimal()
+
+plot2
 
 ```
 
@@ -1171,8 +1192,8 @@ lm.time_growth_null =
   glmer(solveDuration ~
           1 +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
           (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
   data = df.analysis,
@@ -1184,8 +1205,8 @@ lm.time_growth =
           1 +
           trialNum +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
           (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
         data = df.analysis,
@@ -1214,7 +1235,8 @@ df.analysis_subject =
   summarise(mean_pred = mean(predicted_time, na.rm = TRUE),
             .groups = "drop")
 
-df.analysis_subject %>%
+plot3 =
+  df.analysis_subject %>%
   ggplot(aes(x = trialNum,
              y = mean_pred)) +
   geom_line(aes(group = subject_id),
@@ -1234,13 +1256,15 @@ df.analysis_subject %>%
                alpha = 0.2) +
   labs(x = "Puzzle #",
        y = "Time until solution",
-       title = "Predicted performance curves across puzzles: # of boxes solved",
-       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+       title = "Predicted performance curves across puzzles: time until solution",
+       subtitle = "Grey lines are predicted lines for individual subjects,\nblue line and ribbon equal predicted mean + 95% CI") +
   scale_x_continuous(limits = c(1, 8),
                      breaks = seq(1,8,1)) +
   scale_y_continuous(limits = c(0, 300),
                      breaks = seq(0, 300, 60)) +
   theme_minimal()
+
+plot3
 
 ```
 
@@ -1253,8 +1277,8 @@ lm.moves_growth_null =
   glmer(attempt_nInputEvents ~
           1 +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
           (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
   data = df.analysis,
@@ -1266,8 +1290,8 @@ lm.moves_growth =
           1 +
           trialNum +
           # control vars
-          scale(astar_solution_length) +
-          scale(sokobanonline__solve_rate) +
+          scale(age) + # age
+          scale(participantEffort) + # subjective effort
           (1 | puzzle_id_sorted) + # random slope for puzzle
           (1 + trialNum | subject_id), # random slopes and intercepts per subject
         data = df.analysis,
@@ -1292,7 +1316,8 @@ df.analysis_subject =
   summarise(mean_pred = mean(predicted_moves, na.rm = TRUE),
             .groups = "drop")
 
-df.analysis_subject %>%
+plot4 =
+  df.analysis_subject %>%
   ggplot(aes(x = trialNum,
              y = mean_pred)) +
   geom_line(aes(group = subject_id),
@@ -1312,20 +1337,25 @@ df.analysis_subject %>%
                alpha = 0.2) +
   labs(x = "Puzzle #",
        y = "# of moves",
-       title = "Predicted performance curves across puzzles: # of moves solved",
-       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+       title = "Predicted performance curves across puzzles: # of moves",
+subtitle = "Grey lines are predicted lines for individual subjects,\nblue line and ribbon equal predicted mean + 95% CI") +
   scale_x_continuous(limits = c(1, 8),
                      breaks = seq(1,8,1)) +
   scale_y_continuous(limits = c(0, 600),
                      breaks = seq(0, 600, 100)) +
   theme_minimal()
 
-```
-
-# Exploration
-
-```{r}
-
-
+plot4
 
 ```
+
+```{r fig.width = 12, fig.height = 8}
+
+combined_plot =
+  plot1 + plot2 + plot3 + plot4
+
+combined_plot
+
+```
+
+# 

@@ -58,7 +58,6 @@ options(xtable.timestamp = "")
 set.seed(1)
 
 # set directories for plots and data outputs
-stim_dir = '../stimuli/'
 figures_dir = '../figures/'
 data_dir = '../data/'
 
@@ -72,7 +71,7 @@ data_dir = '../data/'
 
 # import stimuli information
 df.stimuli =
-  read_csv(paste0(stim_dir,
+  read_csv(paste0(data_dir,
                   "fun-puzzles-exp1/production2_puzzles-test.csv"))
   
 df.stimuli %>%
@@ -554,6 +553,20 @@ Fitting the mixed effects model:
 ```{r}
 
 # mixed effects model
+
+lm.pct_solved_empty =
+  glmer(solved ~
+          1 +
+          # controlling for other variables
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
+          # random intercept for player
+          (1 | subject_id),
+        family = binomial(link = "logit"),
+        data = df.analysis)
+
 lm.pct_solved_order =
   glmer(solved ~
           1 +
@@ -572,6 +585,8 @@ lm.pct_solved_order =
 # summary
 lm.pct_solved_order %>%
   summary()
+
+anova(lm.pct_solved_empty, lm.pct_solved_order)
 
 # Calculate estimates
 lm.pct_solved_order %>%
@@ -644,16 +659,29 @@ Fitting the mixed effects model:
 ```{r}
 
 # mixed effects model
+lm.number_solved_empty =
+  glmer(boxesSolved ~
+          1 +
+          # controlling for other variables
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.analysis)
+
 lm.number_solved_order =
   glmer(boxesSolved ~
           1 +
           # fixed effect for puzzle order (controlling for difficulty)
           trialNum +
           # controlling for other variables
-          sokobanonline__solve_rate + # difficulty
-          participantEffort + # subjective effort
-          attempt_nRestart + # no of attempts
-          mean_enjoyable + # sampled enjoyment ratings
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
           # random intercept for player
           (1 | subject_id),
         family = poisson(link = "log"),
@@ -662,6 +690,8 @@ lm.number_solved_order =
 # summary
 lm.number_solved_order %>%
   summary()
+
+anova(lm.number_solved_empty, lm.number_solved_order)
 
 # Calculate estimates
 lm.number_solved_order %>%
@@ -734,16 +764,29 @@ Fitting the mixed effects model:
 ```{r}
 
 # mixed effects model
+lm.duration_order_empty =
+  glmer(solveDuration ~
+          1 +
+          # controlling for other variables
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.analysis)
+
 lm.duration_order =
   glmer(solveDuration ~
           1 +
           # fixed effect for puzzle order (controlling for difficulty)
           trialNum +
           # controlling for other variables
-          sokobanonline__solve_rate + # difficulty
-          participantEffort + # subjective effort
-          attempt_nRestart + # no of attempts
-          mean_enjoyable + # sampled enjoyment ratings
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
           # random intercept for player
           (1 | subject_id),
         family = poisson(link = "log"),
@@ -752,6 +795,8 @@ lm.duration_order =
 # summary
 lm.duration_order %>%
   summary()
+
+anova(lm.duration_order_empty, lm.duration_order)
 
 # Calculate estimates
 lm.duration_order %>%

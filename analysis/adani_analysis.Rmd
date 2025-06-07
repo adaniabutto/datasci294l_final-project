@@ -1,0 +1,1286 @@
+---
+title: "Learning Analysis"
+author: "Adani B. Abutto"
+date: "`r Sys.Date()`"
+
+output:
+  bookdown::html_document2:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    theme: cosmo
+    highlight: tango
+
+header-includes:
+    - \usepackage{setspace}\doublespacing
+---
+
+```{r setup, include = F, message = F, warning = F}
+
+# load relevant libraries and functions
+require(knitr)         # for knitting
+library(readr)
+library(stringr)
+library(Hmisc)         # for bootstrapped confidence intervals
+library(png)           # for working with images
+library(grid)
+library(tidyboot)
+library(ggpubr)
+library(lme4)          # for modeling
+library(brms)
+library(ggeffects)
+library(patchwork)     # for multiple plots
+library(ltm)           # for IRT models
+library(GGally)
+library(forcats)
+library(tidyr)
+library(dplyr)     # for everything else
+
+# load source code
+source("../utils/utils.R")
+
+# set default code chunk options
+knitr::opts_chunk$set(echo = T, warning = F, message = F)
+
+# set default plot theme 
+theme_set(theme_classic() + 
+            theme(text = element_text(size = 28))) 
+
+# fix print width for knitted doc
+options(width = 70)
+
+# suppress warnings about grouping 
+options(dplyr.summarise.inform = F)
+options(xtable.floating = F)
+options(xtable.timestamp = "")
+
+# set random seed
+set.seed(1)
+
+# set directories for plots and data outputs
+stim_dir = '../stimuli/'
+figures_dir = '../figures/'
+data_dir = '../data/'
+
+```
+
+# Data Import and Cleaning
+
+## Stimuli
+
+```{r}
+
+# import stimuli information
+df.stimuli =
+  read_csv(paste0(stim_dir,
+                  "fun-puzzles-exp1/production2_puzzles-test.csv"))
+  
+df.stimuli %>%
+  head()
+
+```
+
+## Metadata
+
+```{r}
+
+df.metadata =
+  read_csv(paste0(data_dir,
+                  "exp1_puzzle-metadata.csv"))
+
+df.metadata %>%
+  head()
+
+```
+
+## Exclusions
+
+```{r}
+
+df.exclusions =
+  read_csv(paste0(data_dir,
+                  "fun-puzzles-exp1/production2_exclusions.csv"))
+
+df.exclusions %>%
+  count(reasons)
+
+```
+
+## Exit Survey Data
+
+```{r}
+
+df.survey =
+  read_csv(paste0(data_dir,
+                  "fun-puzzles-exp1/production2_survey.csv"))
+
+df.survey_processed =
+  df.survey %>%
+  # mutate scales to show labels
+  mutate(judgedDifficulty = factor(judgedDifficulty,
+                                   levels = c(1, 2, 3, 4, 5),
+                                   labels = c("1\nVery Easy", "2", "3", "4", "5\nVery Hard")),
+         participantEffort = factor(participantEffort,
+                                    levels = c(1, 2, 3, 4, 5),
+                                    labels = c("1\nVery Low", "2", "3", "4", "5\nVery High")),
+         sokobanFamiliarity = factor(sokobanFamiliarity,
+                                     levels = c(0, 1, 2, 3),
+                                     labels = c("Never", "A few times", "Several times", "Very familiar")),
+         gamingFrequency = factor(gamingFrequency,
+                                  levels = c(0, 1, 2, 3, 4),
+                                  labels = c("None", "< 1h", "1-5h", "6-10h", "> 10h"))) %>%
+  # filter out exclusions
+  filter(!gameID %in% df.exclusions$gameID)
+
+df.survey_processed %>%
+  head()
+
+```
+
+## Gameplay Data
+
+8 test trials:
+
+```{r}
+
+df.game =
+  read_csv(paste0(data_dir,
+                  "/fun-puzzles-exp1/production2_testTrials.csv"))
+
+df.game_processed = 
+  df.game %>%
+  # filter out exclusions
+  filter(!gameID %in% df.exclusions$gameID) %>%
+  # complement puzzle ids
+  mutate(puzzle_id = paste(str_sub(collection_name, 1, 7), level_name)) %>%
+  # rename cols
+  rename(rating = rate_response,
+         ratingRT = rate_rt)
+
+df.game_processed %>%
+  head()
+
+```
+
+```{r}
+
+# calculate summary ratings
+df.summary_ratings =
+  df.game_processed %>%
+  # bootstrap ci
+  group_by(stimuli_set, puzzle_id, condition) %>%
+  tidyboot_mean(rating, na.rm = T) %>%
+  ungroup() %>%
+  # median, sd, etc.
+  left_join(summarizer(df.game_processed, target_cols = c(rating), 
+                       puzzle_id, condition) %>%
+              dplyr::select(-ends_with('mean')),
+            by = c("puzzle_id", "condition")) %>%
+  rename(rating_meanBoot = empirical_stat, 
+         rating_mean = mean,
+         rating_ciLo = ci_lower,
+         rating_ciHi = ci_upper)
+
+df.summary_ratings %>%
+  head()
+
+# add avg ratings to game data df
+df.game_processed =
+  df.game_processed %>%
+  left_join(df.summary_ratings %>%
+              dplyr::select(condition, puzzle_id, rating_mean) %>%
+  pivot_wider(names_from = condition, values_from = rating_mean)) %>%
+  rename(mean_difficult = difficult,
+         mean_enjoyable = enjoyable) %>%
+  mutate(puzzle_id_sorted = reorder(puzzle_id, mean_difficult))
+
+```
+
+16 comparison trials:
+
+```{r}
+
+df.comparison =
+  read_csv(paste0(data_dir,
+                  "fun-puzzles-exp1/production2_compareTrials.csv"))
+
+df.comparison_processed =
+  df.comparison %>%
+  # filter out exclustions
+  filter(!gameID %in% df.exclusions$gameID) %>%
+  # keep only relevant cols
+  dplyr::select(gameID:level_name_1) %>%
+  # add phase and puzzle info
+  mutate(study_phase = factor(study_phase,
+                              levels = c("pretest", "posttest")),
+         puzzle_id_0 = paste(str_sub(collection_name_0, 1, 7),
+                             level_name_0),
+         puzzle_id_1 = paste(str_sub(collection_name_1, 1, 7),
+                             level_name_1)) %>%
+  # keep only relevant cols
+  dplyr::select(-c(collection_name_0:level_name_1)) %>%
+  # compute response times
+  mutate(rt_done2 = rt_done2 - rt_done1,
+         rt_choose = rt - rt_done2)
+
+df.comparison_processed %>%
+  head()
+
+```
+
+Create dataset containing all relevant information at once:
+
+```{r}
+
+df.analysis =
+  df.game_processed %>%
+  left_join(df.survey_processed %>%
+              dplyr::select(gameID,
+                     judgedDifficulty,
+                     participantEffort,
+                     sokobanFamiliarity),
+            by = "gameID") %>%
+  left_join(df.metadata %>%
+              dplyr::select(puzzle_id_num = puzzle_id,
+                     layout,
+                     sokobanonline__solve_rate,
+                     astar_iters, astar_solution_length),
+            by = "layout") %>%
+  left_join(df.survey_processed %>%
+            dplyr::select(gameID,
+                   age = participantYears,
+                   gender = participantGender),
+          by = "gameID") %>%
+  mutate(judgedDifficulty = as.numeric(judgedDifficulty),
+         sokobanFamiliarity = as.numeric(sokobanFamiliarity),
+         participantEffort = as.numeric(participantEffort)) %>% 
+  dplyr::select(subject_id = gameID,
+         age, gender,
+         puzzle_id_sorted, puzzle_id_num,
+         trialNum, stimuli_set,
+         layout,
+         select_response, rating,
+         solveDuration, solved, boxesSolved,
+         attempt_nInputEvents, attempt_nRestart, attempt_nUndo,
+         sokobanonline__solve_rate, astar_iters, astar_solution_length,
+         judgedDifficulty, mean_difficult,
+         participantEffort, mean_enjoyable,
+         sokobanFamiliarity)
+
+df.analysis %>%
+  head()
+  
+```
+
+# Descriptives
+
+Age by condition:
+
+```{r}
+
+df.analysis %>%
+  distinct(subject_id, age, .keep_all = F) %>%
+  summarise(n = n(),
+            M = mean(age),
+            SD = sd(age),
+            min = min(age),
+            max = max(age))
+
+```
+
+Gender:
+
+```{r}
+
+df.analysis %>%
+  distinct(subject_id, gender, .keep_all = F) %>%
+  count(gender)
+
+```
+
+Experience:
+
+```{r}
+
+df.survey_processed %>%
+  count(sokobanFamiliarity)
+
+```
+
+# Plots
+
+## % solved per puzzle
+
+```{r fig.width = 12, fig.height = 10}
+
+df.analysis %>%
+  group_by(puzzle_id_sorted) %>%
+  summarise(n = n(),
+            M = mean(solved, na.rm = T),
+            SD = sd(solved, na.rm = T),
+            min = min(solved, na.rm = T),
+            max = max(solved, na.rm = T)) %>%
+    arrange(desc(M))
+
+df.analysis %>%
+  filter(!is.na(solved)) %>%
+  mutate(puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  group_by(puzzle_id_sorted) %>%
+  filter(n() > 0) %>%
+  ungroup() %>%
+  ggplot(aes(x = factor(puzzle_id_sorted),
+             y = (solved)*100,
+             fill = stimuli_set)) +
+  stat_summary(fun = mean,
+               geom = "bar",
+               width = 0.6) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "errorbar",
+               width = 0.2) +
+  scale_y_continuous(limits = c(0, 100),
+                     breaks = seq(0, 100, 25)) +
+  labs(x = "Puzzle name",
+       y = "% solved",
+       title = "% solved per puzzle",
+       subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)",
+       fill = "Puzzle block") +
+  coord_flip()
+
+```
+
+## No of boxes solved per puzzle
+
+```{r fig.width = 12, fig.height = 10}
+
+df.analysis %>%
+  group_by(puzzle_id_sorted) %>%
+  summarise(n = n(),
+            M = mean(boxesSolved, na.rm = T),
+            SD = sd(boxesSolved, na.rm = T),
+            min = min(boxesSolved, na.rm = T),
+            max = max(boxesSolved, na.rm = T)) %>%
+    arrange(desc(M))
+
+df.analysis %>%
+  filter(!is.na(solved)) %>%
+  mutate(puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  group_by(puzzle_id_sorted) %>%
+  filter(n() > 0) %>%
+  ungroup() %>%
+  ggplot(aes(x = factor(puzzle_id_sorted),
+             y = boxesSolved)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "pointrange",
+               width = 0.2,
+               aes(color = stimuli_set)) +
+  geom_point(position = position_jitter(height = .05,
+                                      width = 0.1),
+           alpha = .05,
+           size = 2,
+           show.legend = FALSE) +
+  scale_y_continuous(limits = c(0, 3),
+                     breaks = seq(0, 3, 1)) +
+  labs(x = "Puzzle name",
+       y = "# of boxes solved",
+       title = "Number of boxes solved per puzzle (out of 3)",
+       subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)",
+       color = "Puzzle block") +
+  coord_flip()
+
+```
+
+## No of actions
+
+```{r fig.width = 13, fig.height = 10}
+
+df.analysis %>%
+  group_by(puzzle_id_sorted) %>%
+  summarise(n = n(),
+            M = mean(attempt_nInputEvents),
+            SD = sd(attempt_nInputEvents),
+            min = min(attempt_nInputEvents),
+            max = max(attempt_nInputEvents)) %>%
+    arrange(desc(M))
+
+df.analysis %>%
+  filter(!is.na(solved)) %>%
+  mutate(puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  group_by(puzzle_id_sorted) %>%
+  filter(n() > 0) %>%
+  ungroup() %>%
+  ggplot(aes(x = factor(puzzle_id_sorted),
+             y = attempt_nInputEvents)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "pointrange",
+               width = 0.2,
+               aes(color = stimuli_set)) +
+  geom_point(position = position_jitter(height = .05,
+                                    width = .1),
+         alpha = .05,
+         size = 2,
+         show.legend = FALSE) +
+  scale_y_continuous(limits = c(0, 600),
+                   breaks = seq(0, 600, 50)) +
+  labs(x = "Puzzle name",
+       y = "# of moves attempted",
+       title = "Number of moves per puzzle",
+       subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)",
+       color = "Puzzle block") +
+  coord_flip()
+
+```
+
+## Time until solution
+
+```{r fig.width = 12, fig.height = 10}
+
+df.analysis %>%
+  group_by(puzzle_id_sorted) %>%
+  summarise(n = n(),
+            M = mean(solveDuration, na.rm = T),
+            SD = sd(solveDuration, na.rm = T),
+            min = min(solveDuration, na.rm = T),
+            max = max(solveDuration, na.rm = T)) %>%
+    arrange(desc(M))
+
+df.analysis %>%
+  filter(!is.na(solved)) %>%
+  mutate(puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                 solved,
+                                 .fun = mean, .na_rm = TRUE)) %>%
+  group_by(puzzle_id_sorted) %>%
+  filter(n() > 0) %>%
+  ungroup() %>%
+  ggplot(aes(x = factor(puzzle_id_sorted),
+             y = solveDuration)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "pointrange",
+               width = 0.2,
+               aes(color = stimuli_set)) +
+  geom_point(position = position_jitter(height = .05,
+                                        width = .1),
+             size = 2,
+             alpha = .05,
+             show.legend = FALSE) +
+  scale_y_continuous(limits = c(0, 300),
+                     breaks = seq(0, 300, 60)) +
+  labs(x = "Puzzle name",
+       y = "Time until solution (in sec)",
+       title = "Time until solution per puzzle",
+       subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)",
+       color = "Puzzle block") +
+  coord_flip()
+
+```
+
+# Modeling
+
+## Improvement over time
+
+### Performance on first half of puzzles vs last half of puzzles
+
+Do people generally become better at Sokoban over time?
+
+I.e., do we see differences in performance metrics (% solved, boxes solved, time until
+solution, number of steps) when we compare the first four puzzles people solved, vs the
+last four puzzles people solved?
+
+#### % solved
+
+```{r fig.width = 12, fig.height = 10}
+
+plot1 =
+  df.analysis %>%
+  mutate(trialNum = case_when(trialNum > 4 ~ "Last half of puzzles",
+                              trialNum <= 4 ~ "First half of puzzles"),
+         puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  filter(!is.na(trialNum)) %>%
+  ggplot(aes(x = puzzle_id_sorted,
+             y = (solved)*100,
+             fill = trialNum)) +
+  stat_summary(fun = mean,
+               geom = "bar",
+               width = .6,
+               position = position_dodge(.8)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "errorbar",
+               position = position_dodge(.8)) +
+  scale_y_continuous(limits = c(0, 100),
+                     breaks = seq(0, 100, 25)) +
+  labs(x = "Puzzle name",
+       y = "% solved",
+       title = "% solved over time",
+       fill = "Stage") +
+  coord_flip() +
+  theme(legend.position = "top")
+
+plot1
+
+```
+
+Do we see a progression in % solved when we break it down by puzzle order?
+
+```{r fig.width = 7, fig.height = 5}
+
+df.analysis %>%
+  group_by(trialNum, puzzle_id_sorted) %>%
+  summarise(mean = mean(solved)) %>%
+  ggplot(aes(x = trialNum,
+             y = (mean*100),
+             color = puzzle_id_sorted)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .4) +
+  labs(x = "Puzzle order (1 through 8)",
+       y = "% solved",
+       title = "% solved over time",
+       fill = "Puzzle") +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(1,8,1))
+
+```
+
+Fitting the mixed effects model:
+
+```{r}
+
+# mixed effects model
+lm.pct_solved_order =
+  glmer(solved ~
+          1 +
+          # fixed effect for puzzle order
+          trialNum +
+          # controlling for other variables
+          scale(age) + # age
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(astar_iters) + # difficulty
+          scale(participantEffort) + # subjective effort
+          # random intercept for player
+          (1 | subject_id),
+        family = binomial(link = "logit"),
+        data = df.analysis)
+
+# summary
+lm.pct_solved_order %>%
+  summary()
+
+# Calculate estimates
+lm.pct_solved_order %>%
+  ggpredict(bias_correction = T)
+
+```
+
+#### Boxes solved
+
+```{r fig.width = 12, fig.height = 10}
+
+plot2 =
+  df.analysis %>%
+  mutate(trialNum = case_when(trialNum > 4 ~ "Last half of puzzles",
+                              trialNum <= 4 ~ "First half of puzzles"),
+         puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  filter(!is.na(trialNum)) %>%
+  ggplot(aes(x = puzzle_id_sorted,
+             y = boxesSolved,
+             color = trialNum)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "pointrange",
+               position = position_dodge(.8)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .1) +
+  scale_y_continuous(limits = c(0, 3),
+                     breaks = seq(0,3,1)) +
+  labs(x = "Puzzle name",
+       y = "# of boxes solved (0-3)",
+       title = "# of boxes solved over time",
+       color = "Stage") +
+  coord_flip() +
+  theme(legend.position = "top")
+
+plot2
+
+```
+
+When broken down by individual puzzle:
+
+```{r fig.width = 8, fig.height = 5}
+
+df.analysis %>%
+  group_by(trialNum, puzzle_id_sorted) %>%
+  summarise(mean = mean(boxesSolved)) %>%
+  ggplot(aes(x = trialNum,
+             y = mean,
+             color = puzzle_id_sorted)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .4) +
+  labs(x = "Puzzle order (1 through 8)",
+       y = "Mean # of boxes solved",
+       title = "Mean # of boxes solved over time",
+       fill = "Puzzle") +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(1,8,1)) +
+  scale_y_continuous(limits = c(0,3),
+                     breaks = seq(0,3,1))
+
+```
+
+Fitting the mixed effects model:
+
+```{r}
+
+# mixed effects model
+lm.number_solved_order =
+  glmer(boxesSolved ~
+          1 +
+          # fixed effect for puzzle order (controlling for difficulty)
+          trialNum +
+          # controlling for other variables
+          sokobanonline__solve_rate + # difficulty
+          participantEffort + # subjective effort
+          attempt_nRestart + # no of attempts
+          mean_enjoyable + # sampled enjoyment ratings
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.analysis)
+
+# summary
+lm.number_solved_order %>%
+  summary()
+
+# Calculate estimates
+lm.number_solved_order %>%
+  ggpredict(bias_correction = T)
+
+```
+
+#### Time spent
+
+```{r fig.width = 12, fig.height = 10}
+
+plot3 =
+  df.analysis %>%
+  mutate(trialNum = case_when(trialNum > 4 ~ "Last half of puzzles",
+                              trialNum <= 4 ~ "First half of puzzles"),
+         puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  filter(!is.na(trialNum)) %>%
+  ggplot(aes(x = puzzle_id_sorted,
+             y = solveDuration,
+             color = trialNum)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "pointrange",
+               position = position_dodge(.8)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .1) +
+  scale_y_continuous(limits = c(0, 300),
+                     breaks = seq(0,300,60)) +
+  labs(x = "Puzzle name",
+       y = "# of boxes solved (0-3)",
+       title = "# of boxes solved over time",
+       color = "Stage") +
+  coord_flip() +
+  theme(legend.position = "top")
+
+plot3
+
+```
+
+When broken down by puzzle:
+
+```{r fig.width = 8, fig.height = 5}
+
+df.analysis %>%
+  group_by(trialNum, puzzle_id_sorted) %>%
+  summarise(mean = mean(solveDuration, na.rm = T)) %>%
+  ggplot(aes(x = trialNum,
+             y = mean,
+             color = puzzle_id_sorted)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .4) +
+  labs(x = "Puzzle order (1 through 8)",
+       y = "Mean solve time",
+       title = "Mean solve time over time",
+       fill = "Puzzle") +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(1,8,1)) +
+  scale_y_continuous(limits = c(0,300),
+                     breaks = seq(0,300,60))
+
+```
+
+Fitting the mixed effects model:
+
+```{r}
+
+# mixed effects model
+lm.duration_order =
+  glmer(solveDuration ~
+          1 +
+          # fixed effect for puzzle order (controlling for difficulty)
+          trialNum +
+          # controlling for other variables
+          sokobanonline__solve_rate + # difficulty
+          participantEffort + # subjective effort
+          attempt_nRestart + # no of attempts
+          mean_enjoyable + # sampled enjoyment ratings
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.analysis)
+
+# summary
+lm.duration_order %>%
+  summary()
+
+# Calculate estimates
+lm.duration_order %>%
+  ggpredict(bias_correction = T)
+
+```
+
+#### No of moves
+
+```{r fig.width = 12, fig.height = 10}
+
+plot4 =
+  df.analysis %>%
+  mutate(trialNum = case_when(trialNum > 4 ~ "Last half of puzzles",
+                              trialNum <= 4 ~ "First half of puzzles"),
+         puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                                        solved,
+                                        .fun = mean, .na_rm = TRUE)) %>%
+  filter(!is.na(trialNum)) %>%
+  ggplot(aes(x = puzzle_id_sorted,
+             y = attempt_nInputEvents,
+             color = trialNum)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "pointrange",
+               position = position_dodge(.8)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .1) +
+  labs(x = "Puzzle name",
+       y = "# of moves",
+       title = "# of moves over time",
+       color = "Stage") +
+  coord_flip() +
+  theme(legend.position = "top")
+
+plot4
+
+```
+
+```{r fig.width = 20, fig.height = 17}
+
+combined_plot = 
+  plot1 + plot2 + plot3 + plot4
+
+combined_plot
+
+```
+
+When broken down by puzzle:
+
+```{r fig.width = 8, fig.height = 5}
+
+df.analysis %>%
+  group_by(trialNum, puzzle_id_sorted) %>%
+  summarise(mean = mean(attempt_nInputEvents, na.rm = T)) %>%
+  ggplot(aes(x = trialNum,
+             y = mean,
+             color = puzzle_id_sorted)) +
+  geom_point(position = position_jitter(width = .1,
+                                        height = .1),
+             size = 2,
+             alpha = .4) +
+  labs(x = "Puzzle order (1 through 8)",
+       y = "Mean # of moves",
+       title = "Mean # of moves over time",
+       fill = "Puzzle") +
+  theme(legend.position = "none") +
+  scale_x_continuous(breaks = seq(1,8,1)) +
+  scale_y_continuous(limits = c(0, 600),
+                     breaks = seq(0,600,100))
+
+```
+
+Fitting the mixed effects model:
+
+```{r}
+
+# mixed effects model
+lm.moves_order =
+  glmer(attempt_nInputEvents ~
+          1 +
+          # fixed effect for puzzle order (controlling for difficulty)
+          trialNum +
+          # controlling for other variables
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(participantEffort) + # subjective effort
+          scale(attempt_nRestart) + # no of attempts
+          scale(mean_enjoyable) + # sampled enjoyment ratings
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.analysis)
+
+# summary
+lm.moves_order %>%
+  summary()
+
+# Calculate estimates
+lm.moves_order %>%
+  ggpredict(bias_correction = T)
+
+```
+
+## Success on preceding puzzle
+
+Does success on the previous puzzle influence specific puzzle choice?
+
+```{r fig.width = 12, fig.height = 10}
+
+df.analysis =
+  df.analysis %>%
+  mutate(prev_puzzle_solved = lag(solved))
+
+df.analysis %>%
+  filter(!is.na(prev_puzzle_solved)) %>%
+  mutate(puzzle_id_ordered = fct_reorder(puzzle_id_sorted, sokobanonline__solve_rate),
+         prev_puzzle_solved = case_when(prev_puzzle_solved == 1 ~ "Yes",
+                                        prev_puzzle_solved == 0 ~ "No")) %>%
+  group_by(prev_puzzle_solved, stimuli_set, puzzle_id_sorted) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(prev_puzzle_solved, stimuli_set) %>%
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(x = factor(prev_puzzle_solved),
+             y = (prop*100),
+             fill = puzzle_id_sorted)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ stimuli_set + puzzle_id_sorted, ncol = 8) +
+  labs(x = "Previous puzzle solved?",
+       y = "% of times puzzle was chosen",
+       fill = "Puzzle",
+       title = "Player Puzzle Selection by Previous Puzzle Success") +
+  theme(legend.position = "none")
+
+```
+
+```{r}
+
+df.analysis %>%
+  mutate(puzzle_id_sorted = fct_reorder(puzzle_id_sorted,
+                               solved,
+                               .fun = mean, .na_rm = TRUE),
+         prev_puzzle_solved = case_when(prev_puzzle_solved == 1 ~ "Yes",
+                                        prev_puzzle_solved == 0 ~ "No")) %>%
+  filter(!is.na(prev_puzzle_solved)) %>%
+  ggplot(aes(x = puzzle_id_sorted,
+             y = (solved * 100),
+             fill = factor(prev_puzzle_solved))) +
+  stat_summary(fun = mean,
+               geom = "bar",
+               width = .6,
+               alpha = .5,
+               position = position_dodge(.8)) +
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "errorbar",
+               position = position_dodge(.8)) +
+  scale_fill_manual(values = c("Yes" = "darkgreen",
+                               "No" = "darkred")) +
+  labs(x = "Puzzle name",
+       y = "% solved",
+       fill = "Last puzzle solved?",
+       title = "% solved by previous puzzle success",
+       subtitle = "N = 205 subjects, 24 puzzles total (n = 67-70 each)") +
+  coord_flip() +
+  theme(legend.position = "right")
+
+```
+
+Fitting the mixed effects model:
+
+```{r}
+
+# mixed effects model
+df.subset = df.analysis %>%
+  filter(!is.na(prev_puzzle_solved),
+         !is.na(sokobanonline__solve_rate),
+         !is.na(participantEffort))
+
+lm.reduced =
+  glmer(solved ~
+          1 +
+          scale(sokobanonline__solve_rate) +
+          scale(participantEffort) +
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.subset)
+
+lm.previous_performance =
+  glmer(solved ~
+          1 +
+          # fixed effect for previous puzzle solved
+          prev_puzzle_solved +
+          # controlling for other variables
+          scale(sokobanonline__solve_rate) + # difficulty
+          scale(participantEffort) + # subjective effort
+          # random intercept for player
+          (1 | subject_id),
+        family = poisson(link = "log"),
+        data = df.subset)
+
+anova(lm.reduced, lm.previous_performance, test = "Chisq")
+
+# summary
+lm.previous_performance %>%
+  summary()
+
+# Calculate estimates
+lm.previous_performance %>%
+  ggpredict(bias_correction = T)
+
+```
+
+## Growth curve model
+
+\% solved:
+
+```{r}
+
+# null model: no learning over time
+lm.solve_growth_null =
+  glmer(solved ~
+          1 +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) +
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+        data = df.analysis,
+        family = binomial(link = "logit"),
+        control = glmerControl(optimizer = "bobyqa")) 
+
+lm.solve_growth =
+  glmer(solved ~
+          1 +
+          # fixed effect
+          trialNum +
+          # control vars
+          # scale(astar_solution_length) +
+          # scale(sokobanonline__solve_rate) +
+          # (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+        data = df.analysis,
+        family = binomial(link = "logit"),
+        control = glmerControl(optimizer = "bobyqa"))
+
+lm.solve_growth %>%
+  summary()
+
+anova(lm.solve_growth_null, lm.solve_growth, test = "Chisq")
+
+```
+
+```{r}
+
+df.analysis$predicted_solve =
+  predict(lm.solve_growth, type = "response")
+
+df.analysis_subject =
+  df.analysis %>%
+  group_by(subject_id, trialNum) %>%
+  summarise(mean_pred = mean(predicted_solve, na.rm = TRUE),
+            .groups = "drop")
+
+df.analysis_subject %>%
+  ggplot(aes(x = trialNum,
+             y = (mean_pred*100))) +
+  geom_line(aes(group = subject_id),
+            alpha = 0.1, color = "gray") +  # individual trajectories
+  stat_summary(fun = mean,
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "ribbon",
+               aes(group = 1),
+               fill = "#1f77b4",
+               alpha = 0.2) +
+  labs(x = "Puzzle #",
+       y = "% solved",
+       title = "Predicted performance curves across puzzles: % solved",
+       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+  scale_x_continuous(limits = c(1, 8),
+                     breaks = seq(1,8,1)) +
+  theme_minimal()
+
+```
+
+boxes solved:
+
+```{r}
+
+# null model: no learning over time
+lm.boxes_growth_null =
+  glmer(boxesSolved ~
+          1 +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+  data = df.analysis,
+  family = poisson(link = "log"),
+  control = glmerControl(optimizer = "bobyqa"))# full model: 
+
+lm.boxes_growth =
+  glmer(boxesSolved ~
+          1 +
+          trialNum +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+        data = df.analysis,
+        family = poisson(link = "log"),
+        control = glmerControl(optimizer = "bobyqa"))
+
+lm.boxes_growth %>%
+  summary()
+
+anova(lm.boxes_growth_null, lm.boxes_growth, test = "Chisq")
+
+```
+
+```{r}
+
+df.analysis$predicted_boxes =
+  predict(lm.boxes_growth, type = "response")
+
+df.analysis_subject =
+  df.analysis %>%
+  group_by(subject_id, trialNum) %>%
+  summarise(mean_pred = mean(predicted_boxes, na.rm = TRUE),
+            .groups = "drop")
+
+df.analysis_subject %>%
+  ggplot(aes(x = trialNum,
+             y = mean_pred)) +
+  geom_line(aes(group = subject_id),
+            alpha = 0.1, color = "gray") +  # individual trajectories
+  stat_summary(fun = mean,
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun = "errorbar",
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "ribbon",
+               aes(group = 1),
+               fill = "#1f77b4",
+               alpha = 0.2) +
+  labs(x = "Puzzle #",
+       y = "# of boxes solved",
+       title = "Predicted performance curves across puzzles: # of boxes solved",
+       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+  scale_x_continuous(limits = c(1, 8),
+                     breaks = seq(1,8,1)) +
+  scale_y_continuous(limits = c(0, 3),
+                     breaks = seq(0,3, 1)) +
+  theme_minimal()
+
+```
+
+time to solution:
+
+```{r}
+
+# null model: no learning over time
+lm.time_growth_null =
+  glmer(solveDuration ~
+          1 +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+  data = df.analysis,
+  family = poisson(link = "log"),
+  control = glmerControl(optimizer = "bobyqa"))# full model: 
+
+lm.time_growth =
+  glmer(solveDuration ~
+          1 +
+          trialNum +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+        data = df.analysis,
+        family = poisson(link = "log"),
+        control = glmerControl(optimizer = "bobyqa"))
+
+lm.time_growth %>%
+  summary()
+
+anova(lm.time_growth_null, lm.time_growth, test = "Chisq")
+
+```
+
+```{r}
+
+df.analysis =
+  df.analysis %>%
+  mutate(predicted_time = NA_real_)
+
+df.analysis$predicted_time[df.analysis$solved == 1] =
+  predict(lm.time_growth, type = "response")
+
+df.analysis_subject =
+  df.analysis %>%
+  group_by(subject_id, trialNum) %>%
+  summarise(mean_pred = mean(predicted_time, na.rm = TRUE),
+            .groups = "drop")
+
+df.analysis_subject %>%
+  ggplot(aes(x = trialNum,
+             y = mean_pred)) +
+  geom_line(aes(group = subject_id),
+            alpha = 0.1, color = "gray") +  # individual trajectories
+  stat_summary(fun = mean,
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun = "errorbar",
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "ribbon",
+               aes(group = 1),
+               fill = "#1f77b4",
+               alpha = 0.2) +
+  labs(x = "Puzzle #",
+       y = "Time until solution",
+       title = "Predicted performance curves across puzzles: # of boxes solved",
+       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+  scale_x_continuous(limits = c(1, 8),
+                     breaks = seq(1,8,1)) +
+  scale_y_continuous(limits = c(0, 300),
+                     breaks = seq(0, 300, 60)) +
+  theme_minimal()
+
+```
+
+number of moves:
+
+```{r}
+
+# null model: no learning over time
+lm.moves_growth_null =
+  glmer(attempt_nInputEvents ~
+          1 +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+  data = df.analysis,
+  family = poisson(link = "log"),
+  control = glmerControl(optimizer = "bobyqa"))# full model: 
+
+lm.moves_growth =
+  glmer(attempt_nInputEvents ~
+          1 +
+          trialNum +
+          # control vars
+          scale(astar_solution_length) +
+          scale(sokobanonline__solve_rate) +
+          (1 | puzzle_id_sorted) + # random slope for puzzle
+          (1 + trialNum | subject_id), # random slopes and intercepts per subject
+        data = df.analysis,
+        family = poisson(link = "log"),
+        control = glmerControl(optimizer = "bobyqa"))
+
+lm.moves_growth %>%
+  summary()
+
+anova(lm.moves_growth_null, lm.moves_growth, test = "Chisq")
+
+```
+
+```{r}
+
+df.analysis$predicted_moves =
+  predict(lm.moves_growth, type = "response")
+
+df.analysis_subject =
+  df.analysis %>%
+  group_by(subject_id, trialNum) %>%
+  summarise(mean_pred = mean(predicted_moves, na.rm = TRUE),
+            .groups = "drop")
+
+df.analysis_subject %>%
+  ggplot(aes(x = trialNum,
+             y = mean_pred)) +
+  geom_line(aes(group = subject_id),
+            alpha = 0.1, color = "gray") +  # individual trajectories
+  stat_summary(fun = mean,
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun = "errorbar",
+               geom = "line",
+               size = 1,
+               color = "#1f77b4") +  # average curve
+  stat_summary(fun.data = mean_cl_boot,
+               geom = "ribbon",
+               aes(group = 1),
+               fill = "#1f77b4",
+               alpha = 0.2) +
+  labs(x = "Puzzle #",
+       y = "# of moves",
+       title = "Predicted performance curves across puzzles: # of moves solved",
+       subtitle = "Grey lines are individual subjects, blue line and ribbon equal predicted mean + 95% CI") +
+  scale_x_continuous(limits = c(1, 8),
+                     breaks = seq(1,8,1)) +
+  scale_y_continuous(limits = c(0, 600),
+                     breaks = seq(0, 600, 100)) +
+  theme_minimal()
+
+```
+
+# Exploration
+
+```{r}
+
+
+
+```
